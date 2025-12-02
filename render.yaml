@@ -1,0 +1,12 @@
+# render.yaml
+services:
+  - type: web
+    name: clan-rich-signal
+    runtime: node
+    region: frankfurt   # или ваш регион
+    plan: free          # free tier поддерживает веб-сервисы
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
