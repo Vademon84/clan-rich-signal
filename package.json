@@ -1,16 +1,11 @@
-{
-  "name": "clan-rich-signal",
-  "version": "1.0.0",
-  "description": "Голосовой чат клана RICH — сигнальный сервер",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^4.19.2",
-    "ws": "^8.17.1"
-  },
-  "engines": {
-    "node": "20.x"
-  }
-}
+services:
+  - type: web
+    name: clan-rich-signal
+    runtime: node
+    region: frankfurt
+    plan: free
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: NODE_ENV
+        value: production
