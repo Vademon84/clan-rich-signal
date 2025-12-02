@@ -1,7 +1,7 @@
 {
   "name": "clan-rich-signal",
   "version": "1.0.0",
-  "description": "Сигнальный сервер для голосового чата клана RICH",
+  "description": "Голосовой чат клана RICH — сигнальный сервер",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
