@@ -1,4 +1,4 @@
-// server.js
+// server.js - Clan RICH Signal Server
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -94,6 +94,19 @@ wss.on('connection', (ws, request) => {
           }
           break;
 
+        case 'text-message': // ✅ ТЕКСТОВЫЙ ЧАТ ДОБАВЛЕН
+          if (msg.message && msg.message.trim()) {
+            const timestamp = new Date().toISOString();
+            broadcast(currentRoom, {
+              type: 'text-message',
+              userId: clientId,
+              nickname: nickname,
+              message: msg.message,
+              timestamp: timestamp
+            });
+          }
+          break;
+
         case 'leave':
           leaveRoom();
           break;
@@ -117,24 +130,24 @@ wss.on('connection', (ws, request) => {
     leaveRoom();
   });
 
-  // Вспомогательные
+  // Вспомогательные функции
   function leaveRoom() {
     if (!currentRoom || !rooms[currentRoom]) return;
 
     const user = rooms[currentRoom].find(u => u.id === clientId);
     const nick = user ? user.nickname : nickname;
 
-    // Удаляем
+    // Удаляем из комнаты
     rooms[currentRoom] = rooms[currentRoom].filter(u => u.id !== clientId);
     if (rooms[currentRoom].length === 0) {
       delete rooms[currentRoom];
     }
 
-    // Сообщаем с ником!
+    // Сообщаем остальным
     broadcast(currentRoom, {
       type: 'user-left',
       userId: clientId,
-      nickname: nick  // ✅ теперь с ником!
+      nickname: nick
     });
 
     currentRoom = null;
