@@ -1,3 +1,5 @@
+[file name]: server.js
+[file content begin]
 // server.js - Clan RICH Signal Server
 const express = require('express');
 const http = require('http');
@@ -57,6 +59,27 @@ wss.on('connection', (ws, request) => {
     return rooms[room] ? rooms[room].length : 0;
   }
 
+  // Функция для отправки обновленной информации о комнатах всем клиентам
+  function broadcastRoomsInfo() {
+    const roomsInfo = {};
+    Object.keys(rooms).forEach(roomId => {
+      roomsInfo[roomId] = rooms[roomId].map(user => ({
+        id: user.id,
+        nickname: user.nickname
+      }));
+    });
+
+    // Отправляем информацию о комнатах всем подключенным клиентам
+    wss.clients.forEach(client => {
+      if (client.readyState === 1) {
+        client.send(JSON.stringify({
+          type: 'rooms-info',
+          rooms: roomsInfo
+        }));
+      }
+    });
+  }
+
   function leaveRoom() {
     if (!currentRoom || !rooms[currentRoom]) return;
 
@@ -82,6 +105,9 @@ wss.on('connection', (ws, request) => {
     } else {
       delete rooms[currentRoom];
     }
+
+    // Обновляем информацию о комнатах для всех
+    broadcastRoomsInfo();
 
     console.log(`👋 ${nick} покинул комнату "${currentRoom}"`);
     currentRoom = null;
@@ -117,6 +143,18 @@ wss.on('connection', (ws, request) => {
   function isUserInRoom(room, id) {
     return rooms[room]?.some(u => u.id === id) || false;
   }
+
+  // При подключении отправляем текущую информацию о комнатах
+  ws.send(JSON.stringify({
+    type: 'rooms-info',
+    rooms: Object.keys(rooms).reduce((acc, roomId) => {
+      acc[roomId] = rooms[roomId].map(user => ({
+        id: user.id,
+        nickname: user.nickname
+      }));
+      return acc;
+    }, {})
+  }));
 
   ws.on('message', (data) => {
     try {
@@ -165,6 +203,9 @@ wss.on('connection', (ws, request) => {
             userCount: userCount
           }));
 
+          // Обновляем информацию о комнатах для всех
+          broadcastRoomsInfo();
+
           console.log(`✅ ${nickname} вошёл в комнату "${currentRoom}" (всего: ${userCount})`);
           break;
 
@@ -205,6 +246,20 @@ wss.on('connection', (ws, request) => {
           ws.send(JSON.stringify({ type: 'pong' }));
           break;
 
+        case 'get-rooms-info':
+          // Отправляем информацию о комнатах конкретному клиенту
+          ws.send(JSON.stringify({
+            type: 'rooms-info',
+            rooms: Object.keys(rooms).reduce((acc, roomId) => {
+              acc[roomId] = rooms[roomId].map(user => ({
+                id: user.id,
+                nickname: user.nickname
+              }));
+              return acc;
+            }, {})
+          }));
+          break;
+
         default:
           console.warn('Неизвестный тип:', msg.type);
       }
@@ -242,3 +297,4 @@ const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`🚀 HTTP + WebSocket сервер запущен на порту ${PORT}`);
 });
+[file content end]
