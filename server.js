@@ -1,5 +1,3 @@
-[file name]: server.js
-[file content begin]
 // server.js - Clan RICH Signal Server
 const express = require('express');
 const http = require('http');
@@ -297,4 +295,3 @@ const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
   console.log(`🚀 HTTP + WebSocket сервер запущен на порту ${PORT}`);
 });
-[file content end]
