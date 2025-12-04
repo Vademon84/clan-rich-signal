@@ -52,6 +52,47 @@ wss.on('connection', (ws, request) => {
 
   console.log(`🔌 Новое соединение: ${clientId} | IP: ${request.socket.remoteAddress}`);
 
+  function leaveRoom() {
+    if (!currentRoom || !rooms[currentRoom]) return;
+
+    const user = rooms[currentRoom].find(u => u.id === clientId);
+    const nick = user ? user.nickname : nickname;
+
+    // Удаляем из комнаты
+    rooms[currentRoom] = rooms[currentRoom].filter(u => u.id !== clientId);
+    if (rooms[currentRoom].length === 0) {
+      delete rooms[currentRoom];
+    } else {
+      // Сообщаем остальным
+      broadcast(currentRoom, {
+        type: 'user-left',
+        userId: clientId,
+        nickname: nick
+      }, ws);
+    }
+
+    console.log(`👋 ${nick} покинул комнату "${currentRoom}"`);
+    currentRoom = null;
+  }
+
+  function broadcast(room, message, excludeWs = null) {
+    if (!rooms[room]) return;
+    const payload = JSON.stringify(message);
+    rooms[room].forEach(({ ws: clientWs }) => {
+      if (clientWs !== excludeWs && clientWs.readyState === 1) {
+        clientWs.send(payload);
+      }
+    });
+  }
+
+  function findClientInRoom(room, id) {
+    return rooms[room]?.find(u => u.id === id)?.ws || null;
+  }
+
+  function isUserInRoom(room, id) {
+    return rooms[room]?.some(u => u.id === id) || false;
+  }
+
   ws.on('message', (data) => {
     try {
       const msg = JSON.parse(data);
@@ -59,11 +100,24 @@ wss.on('connection', (ws, request) => {
 
       switch (msg.type) {
         case 'join':
-          nickname = msg.nickname || 'Anonymous';
-          currentRoom = msg.room || 'main';
+          // Если уже в комнате, выходим из предыдущей
+          if (currentRoom) {
+            leaveRoom();
+          }
 
-          if (!rooms[currentRoom]) rooms[currentRoom] = [];
-          rooms[currentRoom].push({ id: clientId, ws, nickname });
+          nickname = msg.nickname || 'Anonymous';
+          const newRoom = msg.room || 'main';
+
+          if (!rooms[newRoom]) rooms[newRoom] = [];
+
+          // Проверяем, нет ли уже пользователя в комнате
+          const existingIndex = rooms[newRoom].findIndex(u => u.id === clientId);
+          if (existingIndex >= 0) {
+            rooms[newRoom].splice(existingIndex, 1);
+          }
+
+          rooms[newRoom].push({ id: clientId, ws, nickname });
+          currentRoom = newRoom;
 
           // Сообщаем другим
           broadcast(currentRoom, {
@@ -77,12 +131,14 @@ wss.on('connection', (ws, request) => {
             room: currentRoom,
             users: rooms[currentRoom].map(u => ({ id: u.id, nickname: u.nickname }))
           }));
+
+          console.log(`✅ ${nickname} вошёл в комнату "${currentRoom}"`);
           break;
 
         case 'offer':
         case 'answer':
         case 'ice-candidate':
-          if (msg.targetId) {
+          if (msg.targetId && currentRoom && isUserInRoom(currentRoom, clientId)) {
             const target = findClientInRoom(currentRoom, msg.targetId);
             if (target) {
               target.send(JSON.stringify({
@@ -94,8 +150,8 @@ wss.on('connection', (ws, request) => {
           }
           break;
 
-        case 'text-message': // ✅ ТЕКСТОВЫЙ ЧАТ ДОБАВЛЕН
-          if (msg.message && msg.message.trim()) {
+        case 'text-message':
+          if (currentRoom && isUserInRoom(currentRoom, clientId) && msg.message && msg.message.trim()) {
             const timestamp = new Date().toISOString();
             broadcast(currentRoom, {
               type: 'text-message',
@@ -103,7 +159,7 @@ wss.on('connection', (ws, request) => {
               nickname: nickname,
               message: msg.message,
               timestamp: timestamp
-            });
+            }, ws);
           }
           break;
 
@@ -129,43 +185,6 @@ wss.on('connection', (ws, request) => {
     console.error(`💥 Ошибка (${clientId}):`, err.message);
     leaveRoom();
   });
-
-  // Вспомогательные функции
-  function leaveRoom() {
-    if (!currentRoom || !rooms[currentRoom]) return;
-
-    const user = rooms[currentRoom].find(u => u.id === clientId);
-    const nick = user ? user.nickname : nickname;
-
-    // Удаляем из комнаты
-    rooms[currentRoom] = rooms[currentRoom].filter(u => u.id !== clientId);
-    if (rooms[currentRoom].length === 0) {
-      delete rooms[currentRoom];
-    }
-
-    // Сообщаем остальным
-    broadcast(currentRoom, {
-      type: 'user-left',
-      userId: clientId,
-      nickname: nick
-    });
-
-    currentRoom = null;
-  }
-
-  function broadcast(room, message, excludeWs = null) {
-    if (!rooms[room]) return;
-    const payload = JSON.stringify(message);
-    rooms[room].forEach(({ ws: clientWs }) => {
-      if (clientWs !== excludeWs && clientWs.readyState === 1) {
-        clientWs.send(payload);
-      }
-    });
-  }
-
-  function findClientInRoom(room, id) {
-    return rooms[room]?.find(u => u.id === id)?.ws || null;
-  }
 });
 
 const PORT = process.env.PORT || 8080;
