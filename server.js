@@ -52,6 +52,11 @@ wss.on('connection', (ws, request) => {
 
   console.log(`🔌 Новое соединение: ${clientId} | IP: ${request.socket.remoteAddress}`);
 
+  // Функция подсчета пользователей в комнате
+  function getRoomUserCount(room) {
+    return rooms[room] ? rooms[room].length : 0;
+  }
+
   function leaveRoom() {
     if (!currentRoom || !rooms[currentRoom]) return;
 
@@ -60,15 +65,22 @@ wss.on('connection', (ws, request) => {
 
     // Удаляем из комнаты
     rooms[currentRoom] = rooms[currentRoom].filter(u => u.id !== clientId);
-    if (rooms[currentRoom].length === 0) {
-      delete rooms[currentRoom];
-    } else {
-      // Сообщаем остальным
+    
+    // Отправляем обновленный счетчик пользователей
+    if (rooms[currentRoom].length > 0) {
+      broadcast(currentRoom, {
+        type: 'user-count',
+        count: rooms[currentRoom].length
+      });
+      
+      // Сообщаем остальным о выходе
       broadcast(currentRoom, {
         type: 'user-left',
         userId: clientId,
         nickname: nick
       }, ws);
+    } else {
+      delete rooms[currentRoom];
     }
 
     console.log(`👋 ${nick} покинул комнату "${currentRoom}"`);
@@ -78,8 +90,21 @@ wss.on('connection', (ws, request) => {
   function broadcast(room, message, excludeWs = null) {
     if (!rooms[room]) return;
     const payload = JSON.stringify(message);
+    rooms[room].forEach(({ ws: clientWs, id }) => {
+      if (excludeWs === null || (clientWs !== excludeWs && id !== clientId)) {
+        if (clientWs.readyState === 1) {
+          clientWs.send(payload);
+        }
+      }
+    });
+  }
+
+  // Включая себя
+  function broadcastIncludingSelf(room, message) {
+    if (!rooms[room]) return;
+    const payload = JSON.stringify(message);
     rooms[room].forEach(({ ws: clientWs }) => {
-      if (clientWs !== excludeWs && clientWs.readyState === 1) {
+      if (clientWs.readyState === 1) {
         clientWs.send(payload);
       }
     });
@@ -119,20 +144,28 @@ wss.on('connection', (ws, request) => {
           rooms[newRoom].push({ id: clientId, ws, nickname });
           currentRoom = newRoom;
 
-          // Сообщаем другим
+          // Отправляем счетчик всем в комнате
+          const userCount = rooms[currentRoom].length;
+          broadcastIncludingSelf(currentRoom, {
+            type: 'user-count',
+            count: userCount
+          });
+
+          // Сообщаем другим о присоединении
           broadcast(currentRoom, {
             type: 'user-joined',
             user: { id: clientId, nickname }
           }, ws);
 
-          // Ответ клиенту
+          // Ответ клиенту со списком всех пользователей
           ws.send(JSON.stringify({
             type: 'joined',
             room: currentRoom,
-            users: rooms[currentRoom].map(u => ({ id: u.id, nickname: u.nickname }))
+            users: rooms[currentRoom].map(u => ({ id: u.id, nickname: u.nickname })),
+            userCount: userCount
           }));
 
-          console.log(`✅ ${nickname} вошёл в комнату "${currentRoom}"`);
+          console.log(`✅ ${nickname} вошёл в комнату "${currentRoom}" (всего: ${userCount})`);
           break;
 
         case 'offer':
@@ -153,18 +186,23 @@ wss.on('connection', (ws, request) => {
         case 'text-message':
           if (currentRoom && isUserInRoom(currentRoom, clientId) && msg.message && msg.message.trim()) {
             const timestamp = new Date().toISOString();
-            broadcast(currentRoom, {
+            broadcastIncludingSelf(currentRoom, {
               type: 'text-message',
               userId: clientId,
               nickname: nickname,
               message: msg.message,
               timestamp: timestamp
-            }, ws);
+            });
           }
           break;
 
         case 'leave':
           leaveRoom();
+          break;
+
+        case 'ping':
+          // Keep-alive пинг
+          ws.send(JSON.stringify({ type: 'pong' }));
           break;
 
         default:
@@ -176,13 +214,26 @@ wss.on('connection', (ws, request) => {
     }
   });
 
+  // Keep-alive: отправляем пинг каждые 30 секунд
+  const pingInterval = setInterval(() => {
+    if (ws.readyState === 1) {
+      ws.ping();
+    }
+  }, 30000);
+
+  ws.on('pong', () => {
+    // Клиент ответил на пинг, соединение живо
+  });
+
   ws.on('close', () => {
     console.log(`📴 Соединение закрыто: ${clientId} (${nickname})`);
+    clearInterval(pingInterval);
     leaveRoom();
   });
 
   ws.on('error', (err) => {
     console.error(`💥 Ошибка (${clientId}):`, err.message);
+    clearInterval(pingInterval);
     leaveRoom();
   });
 });
