@@ -1,4 +1,4 @@
-// server.js - Clan RICH Signal Server v2.0
+// server.js - Clan RICH Signal Server v3.0
 const express = require('express');
 const http = require('http');
 const { WebSocketServer } = require('ws');
@@ -8,7 +8,7 @@ const server = http.createServer(app);
 
 const wss = new WebSocketServer({ noServer: true });
 
-// Хранилище комнат: room → [ { id, ws, nickname, roomType } ]
+// Хранилище комнат: room → [ { id, ws, nickname, roomType, color } ]
 const rooms = {};
 const roomConfig = {
     'main': { name: 'Общение', icon: '💬', description: 'Основная комната для общения' },
@@ -26,14 +26,15 @@ app.get('/', (req, res) => {
     const roomStats = Object.entries(rooms).map(([roomId, users]) => ({
         room: roomId,
         name: roomConfig[roomId]?.name || roomId,
-        users: users.length
+        users: users.length,
+        colors: users.map(u => ({ nickname: u.nickname, color: u.color || '#3498db' }))
     }));
 
     res.status(200).send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>Clan RICH Signal Server</title>
+            <title>Clan RICH Signal Server v3.0</title>
             <meta name="viewport" content="width=device-width, initial-scale=1">
             <style>
                 body { background: #0a0a0f; color: #e0e0ff; font-family: 'Segoe UI', system-ui, sans-serif; padding: 2rem; max-width: 1200px; margin: 0 auto; }
@@ -48,6 +49,9 @@ app.get('/', (req, res) => {
                 .stat-number { font-size: 2rem; font-weight: bold; color: #667eea; }
                 code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-family: 'Consolas', monospace; }
                 hr { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 2rem 0; }
+                .user-list { margin-top: 1rem; }
+                .user-item { display: flex; align-items: center; gap: 10px; padding: 8px; margin-bottom: 5px; background: rgba(255,255,255,0.05); border-radius: 6px; }
+                .user-color { width: 16px; height: 16px; border-radius: 4px; border: 2px solid rgba(255,255,255,0.3); }
                 @media (max-width: 600px) {
                     body { padding: 1rem; }
                     .rooms { grid-template-columns: 1fr; }
@@ -55,11 +59,12 @@ app.get('/', (req, res) => {
             </style>
         </head>
         <body>
-            <h1>🚀 Clan RICH — Signal Server v2.0</h1>
+            <h1>🚀 Clan RICH — Signal Server v3.0</h1>
             <div class="status">
                 <p>Статус: <span class="online">✓ ONLINE</span></p>
                 <p>Порт: <b>${process.env.PORT || 8080}</b></p>
                 <p>WebSocket: <code>wss://${req.headers.host}/ws</code></p>
+                <p>Версия: <b>3.0</b> (с поддержкой цветов ника)</p>
             </div>
             
             <div class="stats">
@@ -85,14 +90,25 @@ app.get('/', (req, res) => {
                         <h3>${config.name}</h3>
                         <p>${config.description}</p>
                         <p>Пользователей: <b>${rooms[id] ? rooms[id].length : 0}</b></p>
+                        ${rooms[id] && rooms[id].length > 0 ? `
+                            <div class="user-list">
+                                <small>Сейчас в комнате:</small>
+                                ${rooms[id].map(user => `
+                                    <div class="user-item">
+                                        <div class="user-color" style="background: ${user.color || '#3498db'}"></div>
+                                        <span>${user.nickname}</span>
+                                    </div>
+                                `).join('')}
+                            </div>
+                        ` : ''}
                     </div>
                 `).join('')}
             </div>
             
             <hr>
             <div style="opacity: 0.7; font-size: 0.9rem;">
-                <p>Render • Node.js • ws • v2.0 с комнатами</p>
-                <p>Версия: ${new Date().toLocaleString()}</p>
+                <p>Render • Node.js • ws • v3.0 с поддержкой цветов</p>
+                <p>Запущено: ${new Date().toLocaleString()}</p>
             </div>
         </body>
         </html>
@@ -105,7 +121,8 @@ app.get('/health', (req, res) => {
         uptime: process.uptime(),
         rooms: Object.keys(rooms).length,
         totalUsers: stats.activeUsers,
-        roomConfig: roomConfig
+        roomConfig: roomConfig,
+        version: '3.0'
     });
 });
 
@@ -116,7 +133,8 @@ app.get('/rooms', (req, res) => {
         name: config.name,
         icon: config.icon,
         description: config.description,
-        userCount: rooms[id] ? rooms[id].length : 0
+        userCount: rooms[id] ? rooms[id].length : 0,
+        users: rooms[id] ? rooms[id].map(u => ({ nickname: u.nickname, color: u.color || '#3498db' })) : []
     }));
     
     res.status(200).json(roomInfo);
@@ -138,6 +156,7 @@ wss.on('connection', (ws, request) => {
     const clientId = Date.now() + '-' + Math.random().toString(36).slice(2, 8);
     let currentRoom = null;
     let nickname = 'Anonymous';
+    let userColor = '#3498db'; // Цвет по умолчанию
     
     stats.totalConnections++;
     stats.activeUsers++;
@@ -148,7 +167,8 @@ wss.on('connection', (ws, request) => {
     ws.send(JSON.stringify({
         type: 'server-info',
         roomConfig: roomConfig,
-        serverTime: new Date().toISOString()
+        serverTime: new Date().toISOString(),
+        version: '3.0'
     }));
 
     ws.on('message', (data) => {
@@ -166,6 +186,7 @@ wss.on('connection', (ws, request) => {
                     }
                     
                     nickname = msg.nickname || 'Anonymous';
+                    userColor = msg.color || '#3498db'; // Получаем цвет от клиента
                     currentRoom = roomToJoin;
 
                     // Создаем комнату если её нет
@@ -174,7 +195,13 @@ wss.on('connection', (ws, request) => {
                     // Проверяем, не в комнате ли уже пользователь
                     const existingUserIndex = rooms[currentRoom].findIndex(u => u.id === clientId);
                     if (existingUserIndex === -1) {
-                        rooms[currentRoom].push({ id: clientId, ws, nickname, roomType: currentRoom });
+                        rooms[currentRoom].push({ 
+                            id: clientId, 
+                            ws, 
+                            nickname, 
+                            roomType: currentRoom,
+                            color: userColor // Сохраняем цвет
+                        });
                     }
 
                     // Сообщаем другим пользователям в этой комнате
@@ -185,14 +212,19 @@ wss.on('connection', (ws, request) => {
                             nickname,
                             room: currentRoom,
                             roomName: roomConfig[currentRoom]?.name || currentRoom,
-                            roomIcon: roomConfig[currentRoom]?.icon || '💬'
+                            roomIcon: roomConfig[currentRoom]?.icon || '💬',
+                            color: userColor // Отправляем цвет другим пользователям
                         }
                     }, ws);
 
                     // Ответ клиенту с информацией о пользователях в комнате
                     const roomUsers = rooms[currentRoom]
                         .filter(u => u.id !== clientId)
-                        .map(u => ({ id: u.id, nickname: u.nickname }));
+                        .map(u => ({ 
+                            id: u.id, 
+                            nickname: u.nickname,
+                            color: u.color || '#3498db' // Включаем цвет в ответ
+                        }));
                     
                     ws.send(JSON.stringify({
                         type: 'joined',
@@ -226,10 +258,17 @@ wss.on('connection', (ws, request) => {
                     
                     // Присоединяемся к новой комнате
                     nickname = msg.nickname || nickname;
+                    userColor = msg.color || userColor; // Сохраняем цвет
                     currentRoom = msg.targetRoom;
                     
                     if (!rooms[currentRoom]) rooms[currentRoom] = [];
-                    rooms[currentRoom].push({ id: clientId, ws, nickname, roomType: currentRoom });
+                    rooms[currentRoom].push({ 
+                        id: clientId, 
+                        ws, 
+                        nickname, 
+                        roomType: currentRoom,
+                        color: userColor 
+                    });
                     
                     // Сообщаем другим в новой комнате
                     broadcast(currentRoom, {
@@ -239,14 +278,19 @@ wss.on('connection', (ws, request) => {
                             nickname,
                             room: currentRoom,
                             roomName: roomConfig[currentRoom]?.name || currentRoom,
-                            roomIcon: roomConfig[currentRoom]?.icon || '💬'
+                            roomIcon: roomConfig[currentRoom]?.icon || '💬',
+                            color: userColor
                         }
                     }, ws);
                     
                     // Отправляем подтверждение клиенту
                     const newRoomUsers = rooms[currentRoom]
                         .filter(u => u.id !== clientId)
-                        .map(u => ({ id: u.id, nickname: u.nickname }));
+                        .map(u => ({ 
+                            id: u.id, 
+                            nickname: u.nickname,
+                            color: u.color || '#3498db'
+                        }));
                     
                     ws.send(JSON.stringify({
                         type: 'room-switched',
@@ -389,8 +433,25 @@ setInterval(() => {
     }
 }, 5 * 60 * 1000);
 
+// Логирование статистики каждую минуту
+setInterval(() => {
+    const totalUsers = Object.values(rooms).reduce((sum, room) => sum + room.length, 0);
+    console.log(`📊 Статистика: ${Object.keys(rooms).length} комнат, ${totalUsers} пользователей`);
+    
+    // Логируем информацию о комнатах
+    Object.entries(rooms).forEach(([roomId, users]) => {
+        console.log(`   ${roomConfig[roomId]?.name || roomId}: ${users.length} пользователей`);
+        users.forEach(user => {
+            console.log(`     - ${user.nickname} (${user.color || '#3498db'})`);
+        });
+    });
+}, 60 * 1000);
+
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => {
     console.log(`🚀 HTTP + WebSocket сервер запущен на порту ${PORT}`);
     console.log(`🏠 Доступные комнаты: ${Object.keys(roomConfig).map(id => `${roomConfig[id].icon} ${roomConfig[id].name}`).join(', ')}`);
+    console.log(`🎨 Версия: 3.0 с поддержкой цветов ника`);
+    console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+    console.log(`📊 Статистика: http://localhost:${PORT}/`);
 });
